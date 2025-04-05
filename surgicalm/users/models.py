@@ -1,0 +1,104 @@
+from django.db import models
+from django.contrib.auth.models import AbstractUser
+from datetime import date
+from django.conf import settings
+
+class PartnerHospitals(models.Model):
+    hospital_name = models.CharField(max_length=255, unique=True, null=False, blank=False)
+
+class CustomUser(AbstractUser):
+    
+    USER_TYPE_CHOICES = (
+        ('nurse', 'Nurse'),   
+        ('patient', 'Patient'),
+    )
+    
+    user_type = models.CharField(max_length = 10, choices = USER_TYPE_CHOICES, null=False, blank=False)
+    hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)    
+
+class DataCollection(models.Model):
+    patient = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='data_collection', null=False, blank=False)
+    all_time = models.IntegerField(default=0)
+    week = models.IntegerField(default=0)
+    mon = models.IntegerField(default=0)
+    tues = models.IntegerField(default=0)
+    wed = models.IntegerField(default=0)
+    thur = models.IntegerField(default=0)
+    fri = models.IntegerField(default=0)
+    sat = models.IntegerField(default=0)
+    sun = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"Data Collection for {self.patient}"
+
+class Quotes(models.Model):
+    Quote = models.CharField(max_length=255, null=False, blank=False, unique=True) 
+    
+class TaskList(models.Model): 
+    taskName = models.CharField(max_length= 100, null=False, blank=False)
+    taskDesc = models.CharField(max_length= 100, null=False, blank=False)
+    hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)  
+    icon = models.CharField(max_length=255, default="alarm-outline")
+
+class ModuleCategories(models.Model):
+    category = models.CharField(max_length=255, null=False, blank=False)
+    icon = models.CharField(max_length=255, null=False, blank=False)
+    hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['hospital', 'category', 'icon'], name='unique_per_hospital')
+        ]
+    
+class ModuleSubcategories(models.Model):
+    subcategory = models.CharField(max_length=255, null=False, blank=False)
+    category = models.ForeignKey(ModuleCategories, on_delete=models.CASCADE, null=False, blank=False)
+    hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['category', 'subcategory'], name='unique_subcategory_per_category')
+        ]
+
+class ModulesList(models.Model):
+    hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)
+    category = models.ForeignKey(ModuleCategories, on_delete=models.CASCADE, null=False, blank=False)
+    subcategory = models.ForeignKey(ModuleSubcategories, on_delete=models.CASCADE, null=False, blank=False)
+    title = models.CharField(max_length=255, null=False, blank=False)
+    description = models.TextField(null=False, blank=False)
+    url = models.URLField(null=False, blank=False)
+
+class DailyModuleCategories(models.Model):
+    category = models.ForeignKey(ModuleCategories, on_delete=models.CASCADE, null=False, blank=False)
+    subcategory = models.ForeignKey(ModuleSubcategories, on_delete=models.CASCADE, null=False, blank=False)
+    hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)
+
+class UserVideoRefresh(models.Model):
+    patient = models.OneToOneField(CustomUser, on_delete=models.CASCADE)
+    last_refreshed = models.DateTimeField(auto_now_add=True)
+
+class AssignedModules(models.Model):
+    patient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=False, blank=False)
+    video = models.ForeignKey(ModulesList, on_delete=models.CASCADE)
+    isCompleted = models.BooleanField(default=False)
+
+class AssignedQuote(models.Model):
+    patient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=False, blank=False)
+    quote = models.ForeignKey(Quotes, on_delete=models.CASCADE)   
+
+class AssignedTask(models.Model):
+    patient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=False, blank=False)
+    task = models.ForeignKey(TaskList, on_delete=models.CASCADE)
+    isCompleted = models.BooleanField(default=False)
+
+class WatchedData(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, null=False, blank=False)
+    video = models.ForeignKey(ModulesList, on_delete=models.CASCADE, null=False, blank=False)
+    date = models.DateField(default=date.today(), null=False, blank=False)
+
+class PushNotificationToken(models.Model):
+    user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name="push_token")
+    token = models.CharField(max_length=255, unique=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.token}"
