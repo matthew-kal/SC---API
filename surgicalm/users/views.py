@@ -1,14 +1,11 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import get_object_or_404
 from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from django.contrib.auth.models import User
-from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.urls import reverse
-from django.utils import timezone
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str  
 from django.contrib.auth.tokens import default_token_generator
@@ -17,9 +14,7 @@ from .models import *
 from rest_framework_simplejwt.tokens import RefreshToken
 from .auth import *
 from .serializers import *
-import random
-from datetime import datetime, timedelta, timezone, date
-from django.core.cache import cache
+from django.utils import timezone
 from django.contrib.auth.views import PasswordResetCompleteView
 from django.contrib.auth.views import PasswordResetDoneView
 from django.conf import settings
@@ -333,7 +328,7 @@ def modules_list(request, category, subcategory):
 @permission_classes([IsAuthenticated])
 def dashboard(request):
     user = request.user
-    today_date = date.today()
+    today_date = timezone.now().date()
 
     
     user_refresh = UserVideoRefresh.objects.filter(patient=user).first()
@@ -449,10 +444,10 @@ def refresh_user_data(request):
     # Step 6: Update Refresh Date
     user_refresh = UserVideoRefresh.objects.filter(patient=user).first()
     if user_refresh:
-        user_refresh.last_refreshed = date.today()
+        user_refresh.last_refreshed = timezone.now().date()
         user_refresh.save()
     else:
-        UserVideoRefresh.objects.create(patient=user, last_refreshed=date.today())  
+        UserVideoRefresh.objects.create(patient=user, last_refreshed=timezone.now().date())  
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -492,10 +487,10 @@ def update_video_completion(request, videoId):
 
             # Log watched data if completed
             if is_completed:
-                WatchedData.objects.create(user=user, video=video_tracker.video, date=date.today())
+                WatchedData.objects.create(user=user, video=video_tracker.video, date=timezone.now().date())
 
                 # Update patient’s data collection statistics
-                current_date = datetime.now().date()
+                current_date = timezone.now().date()
                 current_day = current_date.strftime('%A')
 
                 day_mapping = {

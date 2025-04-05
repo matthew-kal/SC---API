@@ -1,6 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-from datetime import date
+from django.utils.timezone import now
 from django.conf import settings
 
 class PartnerHospitals(models.Model):
@@ -94,7 +94,7 @@ class AssignedTask(models.Model):
 class WatchedData(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, null=False, blank=False)
     video = models.ForeignKey(ModulesList, on_delete=models.CASCADE, null=False, blank=False)
-    date = models.DateField(default=date.today(), null=False, blank=False)
+    date = models.DateField(default=now, null=False, blank=False)
 
 class PushNotificationToken(models.Model):
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name="push_token")
