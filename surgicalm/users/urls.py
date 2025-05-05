@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, reverse_lazy
 from .views import *
 from django.contrib.auth import views as auth_views
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -13,17 +13,31 @@ urlpatterns = [
     path('patient/register/', patient_register, name='patient_register'),
     # Patient Login
     path('patient/login/', patient_login, name='patient_login'),
+
     # Forgot Password
-    path('password-reset/', request_password_reset, name='request_password_reset'),
-    path('password-reset/confirm/<uidb64>/<token>/', auth_views.PasswordResetConfirmView.as_view(
-        template_name='password_reset_form.html',
-        success_url = "https://surgicalm.com/reset-success"
-    ), name='password_reset_confirm'),
-    path('password-reset/complete/', CustomPasswordResetCompleteView.as_view(), name='password_reset_complete'),
-    path('password-reset/done/', CustomPasswordResetDoneView.as_view(), name='password_reset_done'),
+    path(
+        "password-reset/",
+        request_password_reset,
+        name="request_password_reset",
+    ),
+    path(
+        "password-reset/confirm/<uidb64>/<token>/",
+        auth_views.PasswordResetConfirmView.as_view(
+            template_name="password_reset_form.html",
+            success_url=reverse_lazy("password_reset_complete"),
+        ),
+        name="password_reset_confirm",
+    ),
+    path(
+        "password-reset/complete/",
+        auth_views.PasswordResetCompleteView.as_view(
+            template_name="password_reset_complete.html"
+        ),
+        name="password_reset_complete",
+    ),
 
     # JWT #
-
+    
     # Token Creation 
     path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     # Access Token Refresh

@@ -159,29 +159,6 @@ def request_password_reset(request):
         print(f'Error sending email: {e}')
         return Response({'error': 'An error occurred while sending the email'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def password_reset_confirm(request):
-    uid = request.query_params.get('uid')
-    token = request.query_params.get('token')
-    new_password = request.data.get('new_password')
-    
-    if not uid or not token or not new_password:
-        return Response({'error': 'Invalid data'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    try:
-        uid = force_str(urlsafe_base64_decode(uid))
-        user = CustomUser.objects.get(pk=uid)
-    except (TypeError, ValueError, OverflowError, CustomUser.DoesNotExist):
-        user = None
-    
-    if user is not None and default_token_generator.check_token(user, token):
-        user.password = make_password(new_password)
-        user.save()
-        return Response({'message': 'Password has been reset successfully'}, status=status.HTTP_200_OK)
-    else:
-        return Response({'error': 'Invalid token or user'}, status=status.HTTP_400_BAD_REQUEST)
-
 class CustomPasswordResetCompleteView(PasswordResetCompleteView):
     template_name = 'templates/password_reset_complete.html'
 class CustomPasswordResetDoneView(PasswordResetDoneView):
@@ -205,7 +182,6 @@ def change_password(request):
     user.save()
 
     return Response({'message': 'Password changed successfully'}, status=status.HTTP_200_OK)
-
 
 
 #NURSE
