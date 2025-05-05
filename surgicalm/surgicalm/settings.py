@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     'users',
     'django_rest_passwordreset',
     'django_crontab',
+    "widget_tweaks", 
     'axes'
 ]
 

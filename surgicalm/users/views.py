@@ -22,11 +22,6 @@ from django.core.exceptions import ObjectDoesNotExist
 from axes.decorators import axes_dispatch 
 from django.db import transaction
 
-
-
-
-
-
 # ADMIN FUNCTIONS
 
 @api_view(['POST'])
