@@ -518,23 +518,12 @@ def user_settings(request):
     except Exception as e:
         return Response({'error': f'An unexpected error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def save_push_token(request):
-    """Save or update the Expo push token for a user."""
-    user = request.user
     token = request.data.get('pushToken')
-
-    print(f"📩 Received push token for user {user.username}: {token}")
-
     if not token:
-        print("❌ Error: No push token received")
-        return Response({'error': 'Push token is required'}, status=400)
-
-    # Save or update the push token for the user
-    PushNotificationToken.objects.update_or_create(user=user, defaults={'token': token})
-
-    print("✅ Token saved successfully")
-    return Response({'message': 'Push token saved successfully'}, status=200)
-
-
+        return Response({'error': 'Missing pushToken'}, status=status.HTTP_400_BAD_REQUEST)
+    PushNotificationToken.objects.update_or_create(token=token, defaults={'patient': request.user})
+    return Response({'status': 'Token saved'}, status=status.HTTP_200_OK)
