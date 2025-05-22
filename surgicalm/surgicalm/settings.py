@@ -7,7 +7,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = ['*'] # Change in Prod 
+ALLOWED_HOSTS = ['*'] #api.surgicalm.com
+CSRF_TRUSTED_ORIGINS = ['https://*.surgicalm.com']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -28,9 +29,7 @@ INSTALLED_APPS = [
     'axes'
 ]
 
-CRON_CLASSES = [
-    ('*/5 * * * *','user.cron.ResetTaskCompletionCronJob'),
-]
+CRON_CLASSES = []
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -39,10 +38,10 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=30),  
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=60),  
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),  
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),  
     'ROTATE_REFRESH_TOKENS': True, 
-    'BLACKLIST_AFTER_ROTATION': False,
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 AUTHENTICATION_BACKENDS = [
@@ -56,6 +55,7 @@ AXES_RESET_ON_SUCCESS = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'surgicalm.middleware.debug_origin',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -134,14 +134,13 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 DEV_KEY = config('DEV_KEY')
 
-# Change after HTTPS Certificate
-SESSION_COOKIE_SECURE = False
-CSRF_COOKIE_SECURE = False
-SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = False # True
+CSRF_COOKIE_SECURE = False # True
 
 # Change in Prod
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = False
+
 
 AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
@@ -151,7 +150,6 @@ AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME')
 DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 STATIC_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/static/'
 
-# Add in prod 
 BASE_URL = config('BASE_URL')
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -160,3 +158,10 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('EMAIL_HOST_USERNAME')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
+
+DEFAULT_FROM_EMAIL =  config('DEFAULT_FROM_EMAIL')
+
+# Add In Prod 
+# SECURE_HSTS_SECONDS = 31536000  
+# SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+# SECURE_HSTS_PRELOAD = True

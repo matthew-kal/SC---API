@@ -36,7 +36,6 @@ class Command(BaseCommand):
                 'title': title,
                 'body': body,
                 'sound': 'default',
-                'data': {'screen': 'Login'}
             } for token in batch]
 
             response = requests.post(EXPO_PUSH_URL, json=messages, headers={'Content-Type': 'application/json'})

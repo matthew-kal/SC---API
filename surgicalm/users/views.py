@@ -1,3 +1,8 @@
+import logging
+logger = logging.getLogger(__name__)
+
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
@@ -6,8 +11,8 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.core.mail import send_mail
 from django.urls import reverse
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.utils.encoding import force_bytes, force_str  
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.hashers import make_password
 from .models import *
@@ -21,6 +26,8 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from axes.decorators import axes_dispatch 
 from django.db import transaction
+
+
 
 # ADMIN FUNCTIONS
 
@@ -92,8 +99,14 @@ def logout(request):
     try:
         refresh_token = request.data["refresh"]
         token = RefreshToken(refresh_token)
-        token.blacklist()
 
+        if token['user_id'] != request.user.id:
+            return Response(
+                {'error': 'Token does not belong to the authenticated user.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        token.blacklist()
         return Response({"message": "Logout successful"}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -134,14 +147,14 @@ def request_password_reset(request):
     email = request.data.get('email')
     if not email:
         return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    user = get_object_or_404(CustomUser, email=email)
-    token = default_token_generator.make_token(user)
-    uid = urlsafe_base64_encode(force_bytes(user.pk))
-    
-    reset_link = f"{settings.BASE_URL}{reverse('password_reset_confirm', kwargs={'uidb64': uid, 'token': token})}"
-    
+
     try:
+        user = CustomUser.objects.get(email=email)
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+
+        reset_link = f"{settings.BASE_URL}{reverse('password_reset_confirm', kwargs={'uidb64': uid, 'token': token})}"
+
         send_mail(
             'Password Reset',
             f'Use the link below to reset your password:\n{reset_link}',
@@ -149,10 +162,12 @@ def request_password_reset(request):
             [email],
             fail_silently=False,
         )
-        return Response({'message': 'Password reset link has been sent to your email'}, status=status.HTTP_200_OK)
+    except CustomUser.DoesNotExist:
+        pass  
     except Exception as e:
-        print(f'Error sending email: {e}')
-        return Response({'error': 'An error occurred while sending the email'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.error(f'Error sending password reset email to {email}: {e}')
+
+    return Response({'message': 'If that email exists, a password reset link has been sent.'}, status=status.HTTP_200_OK)
 
 class CustomPasswordResetCompleteView(PasswordResetCompleteView):
     template_name = 'templates/password_reset_complete.html'
@@ -166,17 +181,25 @@ def change_password(request):
     new_password = request.data.get('new_password')
 
     if not old_password or not new_password:
-        return Response({'error': 'Old password and new password are required'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Old password and new password are required'},
+                    status=status.HTTP_400_BAD_REQUEST)
 
     user = request.user
 
     if not user.check_password(old_password):
-        return Response({'error': 'Old password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Old password is incorrect'},
+                    status=status.HTTP_400_BAD_REQUEST)
 
-    user.password = make_password(new_password)
+    try:
+        validate_password(new_password, user)
+    except ValidationError as e:
+        return Response({'errors': e.messages}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.set_password(new_password)
     user.save()
 
-    return Response({'message': 'Password changed successfully'}, status=status.HTTP_200_OK)
+    return Response({'message': 'Password changed successfully'},
+                status=status.HTTP_200_OK)
 
 
 #NURSE
@@ -477,7 +500,11 @@ def update_video_completion(request, videoId):
                 if current_day in day_mapping:
                     field_name = day_mapping[current_day]
 
-                    data_collection, _ = DataCollection.objects.get_or_create(patient=user)
+                    data_collection = (
+                        DataCollection.objects
+                        .select_for_update()
+                        .get(patient=user)
+                    )
 
                     # Update relevant fields
                     setattr(data_collection, field_name, getattr(data_collection, field_name, 0) + 1)
