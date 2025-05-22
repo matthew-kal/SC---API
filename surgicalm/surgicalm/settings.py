@@ -22,7 +22,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
-    'users',
+    'surgicalm.users',
     'django_rest_passwordreset',
     'django_crontab',
     "widget_tweaks", 
@@ -55,7 +55,6 @@ AXES_RESET_ON_SUCCESS = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'surgicalm.middleware.debug_origin',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
