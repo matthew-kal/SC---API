@@ -1,5 +1,5 @@
 from django.urls import path, reverse_lazy
-from .views import *
+from surgicalm.users.views import *
 from django.contrib.auth import views as auth_views
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -67,11 +67,10 @@ urlpatterns = [
     # Settings
     path('user-settings/', user_settings, name='user_settings'),
     path('change-password/', change_password, name='change_password'),
+    path('delete-account/', delete_account, name='delete_account'),
     # Assignment Completion
     path('update_video_completion/<int:videoId>/', update_video_completion, name='update_video_completion'),
     path('tasks/update-completion/<int:taskId>/', update_task_completion, name='update_task_completion'),
-
-
     # Notifications
     path('api/save-token/', save_push_token, name='save_push_token'),
 

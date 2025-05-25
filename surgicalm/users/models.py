@@ -16,21 +16,6 @@ class CustomUser(AbstractUser):
     user_type = models.CharField(max_length = 10, choices = USER_TYPE_CHOICES, null=False, blank=False)
     hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)    
 
-class DataCollection(models.Model):
-    patient = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='data_collection', null=False, blank=False)
-    all_time = models.IntegerField(default=0)
-    week = models.IntegerField(default=0)
-    mon = models.IntegerField(default=0)
-    tues = models.IntegerField(default=0)
-    wed = models.IntegerField(default=0)
-    thur = models.IntegerField(default=0)
-    fri = models.IntegerField(default=0)
-    sat = models.IntegerField(default=0)
-    sun = models.IntegerField(default=0)
-
-    def __str__(self):
-        return f"Data Collection for {self.patient}"
-
 class Quotes(models.Model):
     Quote = models.CharField(max_length=255, null=False, blank=False, unique=True) 
     

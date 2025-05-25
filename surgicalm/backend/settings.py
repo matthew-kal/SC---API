@@ -65,7 +65,7 @@ MIDDLEWARE = [
     'axes.middleware.AxesMiddleware'
 ]
 
-ROOT_URLCONF = 'surgicalm.urls'
+ROOT_URLCONF = 'backend.urls'
 
 TEMPLATES = [
     {
@@ -83,7 +83,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'surgicalm.wsgi.application'
+WSGI_APPLICATION = 'backend.wsgi.application'
 
 DATABASES = {
     'default': {
@@ -137,8 +137,8 @@ SESSION_COOKIE_SECURE = False # True
 CSRF_COOKIE_SECURE = False # True
 
 # Change in Prod
-CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOW_CREDENTIALS = False
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
 
 
 AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')

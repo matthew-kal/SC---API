@@ -1,8 +1,7 @@
 # serializers.py
 from rest_framework import serializers
-from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from .models import CustomUser, PartnerHospitals
+from surgicalm.users.models import CustomUser, PartnerHospitals
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:

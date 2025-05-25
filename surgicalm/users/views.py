@@ -1,31 +1,43 @@
 import logging
+
+
+
+# Standard library imports
+from django.utils import timezone
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.http import JsonResponse
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
+from django.core.mail import send_mail
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
+from django.contrib.auth.views import PasswordResetCompleteView, PasswordResetDoneView
+from django.conf import settings
+from django.db import transaction
+from django.db.models.functions import TruncDate
+from django.db.models import Count
+
+# Third-party imports
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
+from axes.decorators import axes_dispatch
+from django_ratelimit.decorators import ratelimit
+from django_ratelimit.core import is_ratelimited
+
+# Local (project-specific) imports
+from surgicalm.users.models import *  
+from surgicalm.users.auth import *
+from surgicalm.users.serializers import *
+
+# Logger
 logger = logging.getLogger(__name__)
 
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError
-from django.shortcuts import get_object_or_404
-from django.http import JsonResponse
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from django.core.mail import send_mail
-from django.urls import reverse
-from django.utils.http import urlsafe_base64_encode
-from django.utils.encoding import force_bytes
-from django.contrib.auth.tokens import default_token_generator
-from django.contrib.auth.hashers import make_password
-from .models import *
-from rest_framework_simplejwt.tokens import RefreshToken
-from .auth import *
-from .serializers import *
-from django.utils import timezone
-from django.contrib.auth.views import PasswordResetCompleteView
-from django.contrib.auth.views import PasswordResetDoneView
-from django.conf import settings
-from django.core.exceptions import ObjectDoesNotExist
-from axes.decorators import axes_dispatch 
-from django.db import transaction
+# User Model 
+User = get_user_model()
 
 
 
@@ -33,6 +45,7 @@ from django.db import transaction
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@ratelimit(key='none', rate='5/h', method='POST', block=True)
 def create_nurse(request):
     """Registers a nurse with an assigned hospital if a valid dev key is provided"""
 
@@ -99,13 +112,6 @@ def logout(request):
     try:
         refresh_token = request.data["refresh"]
         token = RefreshToken(refresh_token)
-
-        if token['user_id'] != request.user.id:
-            return Response(
-                {'error': 'Token does not belong to the authenticated user.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         token.blacklist()
         return Response({"message": "Logout successful"}, status=status.HTTP_200_OK)
     except Exception as e:
@@ -141,66 +147,45 @@ def patient_register(request):
         "errors": errors
     }, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
+api_view(['POST'])
 @permission_classes([AllowAny])
+@ratelimit(key='ip', rate='5/h', method='POST', block=False)
 def request_password_reset(request):
-    email = request.data.get('email')
+    if getattr(request, 'limited', False):
+        return Response({'message': 'Too many requests from this IP. Try again later.'}, status=429)
+
+    email = request.data.get('email', '').lower().strip()
     if not email:
-        return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Email is required'}, status=400)
+
+    # Apply secondary throttle: 2/hour per email
+    if is_ratelimited(request=request, key='post:email', rate='2/h', method='POST', increment=True):
+        return Response({'message': 'Too many requests for this account. Try again later.'}, status=429)
 
     try:
-        user = CustomUser.objects.get(email=email)
+        user = CustomUser.objects.get(email__iexact=email)
         token = default_token_generator.make_token(user)
         uid = urlsafe_base64_encode(force_bytes(user.pk))
-
-        reset_link = f"{settings.BASE_URL}{reverse('password_reset_confirm', kwargs={'uidb64': uid, 'token': token})}"
+        reset_link = f"{settings.BASE_URL}/password-reset-confirm/{uid}/{token}/"
 
         send_mail(
-            'Password Reset',
-            f'Use the link below to reset your password:\n{reset_link}',
-            settings.DEFAULT_FROM_EMAIL,
-            [email],
+            subject="Password Reset",
+            message=f"Use the link below to reset your password:\n{reset_link}",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email],
             fail_silently=False,
         )
     except CustomUser.DoesNotExist:
-        pass  
+        pass
     except Exception as e:
-        logger.error(f'Error sending password reset email to {email}: {e}')
+        logger.error(f"Error sending password reset email to {email}: {e}")
 
-    return Response({'message': 'If that email exists, a password reset link has been sent.'}, status=status.HTTP_200_OK)
+    return Response({'message': 'If that account exists, a password reset link has been sent.'}, status=200)
 
 class CustomPasswordResetCompleteView(PasswordResetCompleteView):
     template_name = 'templates/password_reset_complete.html'
 class CustomPasswordResetDoneView(PasswordResetDoneView):
     template_name = 'templates/password_reset_done.html'
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def change_password(request):
-    old_password = request.data.get('old_password')
-    new_password = request.data.get('new_password')
-
-    if not old_password or not new_password:
-        return Response({'error': 'Old password and new password are required'},
-                    status=status.HTTP_400_BAD_REQUEST)
-
-    user = request.user
-
-    if not user.check_password(old_password):
-        return Response({'error': 'Old password is incorrect'},
-                    status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        validate_password(new_password, user)
-    except ValidationError as e:
-        return Response({'errors': e.messages}, status=status.HTTP_400_BAD_REQUEST)
-
-    user.set_password(new_password)
-    user.save()
-
-    return Response({'message': 'Password changed successfully'},
-                status=status.HTTP_200_OK)
-
 
 #NURSE
 
@@ -234,19 +219,23 @@ def search_patients(request):
 @permission_classes([IsAuthenticated])
 def patient_graph(request, id):
     try:
-        data_collection = DataCollection.objects.get(patient_id=id)
+        today = timezone.now().date()
+        start_of_week = today - timezone.timedelta(days=today.weekday())  # Monday
 
-        week_data = {
-            'mon': getattr(data_collection, 'mon', 0),
-            'tues': getattr(data_collection, 'tues', 0),
-            'wed': getattr(data_collection, 'wed', 0),
-            'thur': getattr(data_collection, 'thur', 0),
-            'fri': getattr(data_collection, 'fri', 0),
-            'sat': getattr(data_collection, 'sat', 0),
-            'sun': getattr(data_collection, 'sun', 0),
-            'week': getattr(data_collection, 'week', 0),
-            'all_time': getattr(data_collection, 'all_time', 0),
-        }
+        watched_entries = WatchedData.objects.filter(user_id=id, date__gte=start_of_week)
+        counts_by_day = watched_entries.annotate(day=TruncDate('date')).values('day').annotate(count=Count('id'))
+
+        day_map = {i: day for i, day in enumerate(['mon', 'tues', 'wed', 'thur', 'fri', 'sat', 'sun'])}
+        week_data = {day: 0 for day in day_map.values()}
+
+        for entry in counts_by_day:
+            weekday = entry['day'].weekday() 
+            day_label = day_map.get(weekday)
+            if day_label:
+                week_data[day_label] = entry['count']
+
+        week_data['week'] = sum(week_data.values())
+        week_data['all_time'] = WatchedData.objects.filter(user_id=id).count()
 
         return Response({'weekData': week_data}, status=status.HTTP_200_OK)
 
@@ -372,18 +361,23 @@ def dashboard(request):
             "quote": assigned_quote.quote.Quote  
         }
     
-    data_collection = DataCollection.objects.get(patient=user)
-    week_data = {
-        'mon': getattr(data_collection, 'mon', 0),
-        'tues': getattr(data_collection, 'tues', 0),
-        'wed': getattr(data_collection, 'wed', 0),
-        'thur': getattr(data_collection, 'thur', 0),
-        'fri': getattr(data_collection, 'fri', 0),
-        'sat': getattr(data_collection, 'sat', 0),
-        'sun': getattr(data_collection, 'sun', 0),
-        'week': getattr(data_collection, 'week', 0),
-        'all_time': getattr(data_collection, 'all_time', 0),
-    }
+    today = timezone.now().date()
+    start_of_week = today - timezone.timedelta(days=today.weekday())
+
+    watched_entries = WatchedData.objects.filter(user=user, date__gte=start_of_week)
+    counts_by_day = watched_entries.annotate(day=TruncDate('date')).values('day').annotate(count=Count('id'))
+
+    day_map = {i: day for i, day in enumerate(['mon', 'tues', 'wed', 'thur', 'fri', 'sat', 'sun'])}
+    week_data = {day: 0 for day in day_map.values()}
+
+    for entry in counts_by_day:
+        weekday = entry['day'].weekday()
+        day_label = day_map.get(weekday)
+        if day_label:
+            week_data[day_label] = entry['count']
+
+    week_data['week'] = sum(week_data.values())
+    week_data['all_time'] = WatchedData.objects.filter(user=user).count()
 
     return Response({
         'generalVideos': general_videos or [], 
@@ -476,41 +470,13 @@ def update_video_completion(request, videoId):
         with transaction.atomic():  
             
             video_tracker = AssignedModules.objects.get(patient=user, video_id=videoId)
+            if video_tracker.isCompleted: 
+                return Response({'message': 'Video has already been completed'}, status=status.HTTP_200_OK)
             video_tracker.isCompleted = is_completed
             video_tracker.save()
 
-            # Log watched data if completed
             if is_completed:
                 WatchedData.objects.create(user=user, video=video_tracker.video, date=timezone.now().date())
-
-                # Update patient’s data collection statistics
-                current_date = timezone.now().date()
-                current_day = current_date.strftime('%A')
-
-                day_mapping = {
-                    'Monday': 'mon',
-                    'Tuesday': 'tues',
-                    'Wednesday': 'wed',
-                    'Thursday': 'thur',
-                    'Friday': 'fri',
-                    'Saturday': 'sat',
-                    'Sunday': 'sun'
-                }
-
-                if current_day in day_mapping:
-                    field_name = day_mapping[current_day]
-
-                    data_collection = (
-                        DataCollection.objects
-                        .select_for_update()
-                        .get(patient=user)
-                    )
-
-                    # Update relevant fields
-                    setattr(data_collection, field_name, getattr(data_collection, field_name, 0) + 1)
-                    data_collection.week = getattr(data_collection, 'week', 0) + 1
-                    data_collection.all_time = getattr(data_collection, 'all_time', 0) + 1
-                    data_collection.save()
 
             return Response({'message': 'Video completion status updated successfully.'}, status=status.HTTP_200_OK)
 
@@ -544,6 +510,59 @@ def user_settings(request):
 
     except Exception as e:
         return Response({'error': f'An unexpected error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    old_password = request.data.get('old_password')
+    new_password = request.data.get('new_password')
+
+    if not old_password or not new_password:
+        return Response({'error': 'Old password and new password are required'},
+                    status=status.HTTP_400_BAD_REQUEST)
+
+    user = request.user
+
+    if not user.check_password(old_password):
+        return Response({'error': 'Old password is incorrect'},
+                    status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        validate_password(new_password, user)
+    except ValidationError as e:
+        return Response({'errors': e.messages}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.set_password(new_password)
+    user.save()
+
+    return Response({'message': 'Password changed successfully'},
+                status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@ratelimit(key="ip", rate="5/h", block=True)
+def delete_account(request):
+    """
+    Hard-delete the authenticated user if the provided password is correct.
+    JSON payload: { "password": "<current_password>" }
+    """
+    password = request.data.get("password", "")
+    user = request.user
+
+    if not password:
+        return Response({"detail": "Password required."},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    if not user.check_password(password):
+        return Response({"detail": "Incorrect password."},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    with transaction.atomic():
+        logger.info("User %s <%s> self-deleted account", user.id, user.email)
+        user.delete()           
+
+    return Response({"detail": "Account deleted."}, status=status.HTTP_204_NO_CONTENT)
     
 
 @api_view(['POST'])
@@ -554,3 +573,4 @@ def save_push_token(request):
         return Response({'error': 'Missing pushToken'}, status=status.HTTP_400_BAD_REQUEST)
     PushNotificationToken.objects.update_or_create(token=token, defaults={'patient': request.user})
     return Response({'status': 'Token saved'}, status=status.HTTP_200_OK)
+

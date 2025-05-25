@@ -9,6 +9,9 @@ env/
 ENV/
 *.env
 
+runserver.sh
+rundb.sh
+
 # Django stuff:
 *.log
 local_settings.py

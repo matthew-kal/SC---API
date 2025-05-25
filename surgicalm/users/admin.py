@@ -2,6 +2,6 @@ from django.contrib import admin
 
 # users/admin.py
 from django.contrib.auth.admin import UserAdmin
-from .models import *
+from surgicalm.users.models import *
 
 admin.site.register(CustomUser, UserAdmin)
