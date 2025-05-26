@@ -46,12 +46,19 @@ class ModuleSubcategories(models.Model):
         ]
 
 class ModulesList(models.Model):
+
+    MEDIA_CHOICES = (
+        ('video', 'Video'),
+        ('audio', 'Audio'),
+    )
+
     hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)
     category = models.ForeignKey(ModuleCategories, on_delete=models.CASCADE, null=False, blank=False)
     subcategory = models.ForeignKey(ModuleSubcategories, on_delete=models.CASCADE, null=False, blank=False)
     title = models.CharField(max_length=255, null=False, blank=False)
     description = models.TextField(null=False, blank=False)
     url = models.URLField(null=False, blank=False)
+    media_type   = models.CharField(max_length=5, choices=MEDIA_CHOICES, default='video', null=False, blank=False)
 
 class DailyModuleCategories(models.Model):
     category = models.ForeignKey(ModuleCategories, on_delete=models.CASCADE, null=False, blank=False)

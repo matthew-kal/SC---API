@@ -1,9 +1,12 @@
+
 import logging
+import time  # for constant‑time response padding
 
 
 
 # Standard library imports
 from django.utils import timezone
+from django.urls import reverse
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.http import JsonResponse
 from django.utils.encoding import force_bytes
@@ -119,68 +122,106 @@ def logout(request):
     
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@ratelimit(key='user_or_ip', rate='20/h', method='POST', block=True)
 def patient_register(request):
-    """Registers a new patient and assigns them to the nurse's hospital."""
-    
+    """
+    Create a new patient account under the nurse's hospital.
+    Rate-limited (20 per hour per nurse or IP).
+    Returns HTTP 201 with the new patient id and a Location header.
+    """
     if request.user.user_type != "nurse":
         return Response(
             {"message": "Only nurses can register patients."},
             status=status.HTTP_403_FORBIDDEN
         )
 
-    serializer = PatientRegistrationSerializer(data=request.data, context={'hospital': request.user.hospital})
+    serializer = PatientRegistrationSerializer(
+        data=request.data,
+        context={'hospital': request.user.hospital}
+    )
 
     if serializer.is_valid():
-        patient = serializer.save()
-        patient.save()
+        patient = serializer.save()                     # password validation happens in serializer
+        logger.info("Nurse %s created patient %s", request.user.id, patient.id)
 
-        return Response({"message": "Registration successful"}, status=status.HTTP_201_CREATED)
-    
+        # Build a Location header if you have a detail route; fallback to a sensible URL otherwise
+        try:
+            location = reverse('patient_detail', kwargs={'pk': patient.id})
+        except Exception:
+            location = f"/users/patient/{patient.id}/"
+
+        return Response(
+            {"id": patient.id, "message": "Registration successful"},
+            status=status.HTTP_201_CREATED,
+            headers={'Location': location}
+        )
+
+    # Log and format errors
     errors = serializer.errors
-    formatted_errors = " ".join(
-        f" {' '.join(error_list)}" for field , error_list in errors.items()
+    formatted_errors = " ".join(" ".join(errs) for errs in errors.values())
+    logger.warning("Patient registration failed: %s", formatted_errors)
+
+    return Response(
+        {"message": formatted_errors, "errors": errors},
+        status=status.HTTP_400_BAD_REQUEST
     )
-    print(formatted_errors)
 
-    return Response({
-        "message": f"{formatted_errors}",
-        "errors": errors
-    }, status=status.HTTP_400_BAD_REQUEST)
-
-api_view(['POST'])
+@api_view(['POST'])
 @permission_classes([AllowAny])
 @ratelimit(key='ip', rate='5/h', method='POST', block=False)
 def request_password_reset(request):
+    """
+    Send a password‑reset email *if and only if* the user exists, but
+    take roughly the same amount of time whether or not the e‑mail is registered.
+    This prevents timing‑based account enumeration attacks.
+    """
+    start_time = time.monotonic()          # ── begin timer for constant‑time padding
+
+    # Ratelimit #1: IP-based
     if getattr(request, 'limited', False):
-        return Response({'message': 'Too many requests from this IP. Try again later.'}, status=429)
+        return Response(
+            {'message': 'Too many requests from this IP. Try again later.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
 
     email = request.data.get('email', '').lower().strip()
     if not email:
-        return Response({'error': 'Email is required'}, status=400)
+        return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Apply secondary throttle: 2/hour per email
-    if is_ratelimited(request=request, key='post:email', rate='2/h', method='POST', increment=True):
-        return Response({'message': 'Too many requests for this account. Try again later.'}, status=429)
+    # Ratelimit #2: Per‑email (shared cache)
+    if is_ratelimited(request=request, key=lambda r: email, rate='2/h',
+                      method='POST', increment=True):
+        return Response(
+            {'message': 'Too many requests for this account. Try again later.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
 
     try:
-        user = CustomUser.objects.get(email__iexact=email)
-        token = default_token_generator.make_token(user)
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        reset_link = f"{settings.BASE_URL}/password-reset-confirm/{uid}/{token}/"
+        user = CustomUser.objects.filter(email__iexact=email).first()
+        if user:
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            reset_link = f"{settings.BASE_URL}/password-reset-confirm/{uid}/{token}/"
 
-        send_mail(
-            subject="Password Reset",
-            message=f"Use the link below to reset your password:\n{reset_link}",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
-            fail_silently=False,
-        )
-    except CustomUser.DoesNotExist:
-        pass
+            send_mail(
+                subject="Password Reset",
+                message=f"Use the link below to reset your password:\n{reset_link}",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
     except Exception as e:
-        logger.error(f"Error sending password reset email to {email}: {e}")
+        logger.error(f"Error in password-reset flow for {email}: {e}")
 
-    return Response({'message': 'If that account exists, a password reset link has been sent.'}, status=200)
+    # Constant‑time padding ─ ensure every call lasts at least ~0.5 s
+    elapsed = time.monotonic() - start_time
+    if elapsed < 0.5:
+        time.sleep(0.5 - elapsed)
+
+    return Response(
+        {'message': 'If that account exists, a password reset link has been sent.'},
+        status=status.HTTP_200_OK,
+    )
 
 class CustomPasswordResetCompleteView(PasswordResetCompleteView):
     template_name = 'templates/password_reset_complete.html'
@@ -274,7 +315,7 @@ def subcategory_list(request, category_id):
         subcategories = list(ModuleSubcategories.objects.filter(category_id=category_id, hospital_id=hospital).values("id", "subcategory"))
 
         if not subcategories:
-            return Response({'message': 'No subcategories found for this category.'}, status=status.HTTP_204_NO_CONTENT)
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response({"subcategories": subcategories}, status=status.HTTP_200_OK)
 
@@ -290,8 +331,8 @@ def modules_list(request, category, subcategory):
 
     try:
         videos = ModulesList.objects.filter(
-            category=category, subcategory=subcategory, 
-        ).values('id', 'title', 'url', 'category', 'subcategory', 'description')
+            category_id=category, subcategory_id=subcategory, 
+        ).values('id', 'title', 'url', 'category', 'subcategory', 'description', 'media_type')
         videos_list = list(videos)
         
     except Exception as e:
@@ -334,7 +375,8 @@ def dashboard(request):
             "title": assigned_video.video.title,  
             "description": assigned_video.video.description,  
             "isCompleted": assigned_video.isCompleted,
-            "icon": assigned_video.video.category.icon,  
+            "icon": assigned_video.video.category.icon,
+            "media_type": assigned_video.video.media_type,  
         }
         for assigned_video in assigned_videos
     ]
@@ -382,7 +424,7 @@ def dashboard(request):
     return Response({
         'generalVideos': general_videos or [], 
         'tasks': tasks or [], 
-        'quote': quote or [], 
+        'quote': quote or None, 
         'weekData': week_data or [],
     }, status=200)
 
@@ -405,7 +447,10 @@ def refresh_user_data(request):
         category = category_entry['category']
         subcategory = category_entry['subcategory']
         print("Daily Modules Running")
-        videos = ModulesList.objects.filter(category=category, subcategory=subcategory, hospital=hospital).order_by('?')
+        videos = ModulesList.objects.filter(
+            category_id=category, 
+            subcategory_id=subcategory, 
+            hospital=hospital).order_by('?')
         if videos.exists():
             random_video = videos.first()
             # Ensure uniqueness
