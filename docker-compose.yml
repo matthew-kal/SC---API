@@ -1,0 +1,36 @@
+# docker-compose.yml
+version: '3.8' # Docker Compose file format version
+
+services:
+  # Django web application service (Gunicorn)
+  web:
+    build:
+      context: . # Look for Dockerfile in the current directory (SC---API)
+      dockerfile: Dockerfile # Specify the Dockerfile to use
+    # Command to run Gunicorn. This overrides the CMD in the Dockerfile if present.
+    # We specify it here for clarity within the Compose file.
+    command: gunicorn surgicalm.backend.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60
+    volumes:
+      # Mount the current project directory into /app inside the container.
+      # This is crucial for DEVELOPMENT: code changes on your host reflect instantly.
+      # For PRODUCTION, you might remove this line to ensure the code is baked into the image.
+      # However, for a unified dev/prod compose file, it's often kept.
+      - .:/app
+    expose:
+      - "8000" # Expose port 8000 within the Docker network for Nginx to connect
+    env_file:
+      - ./.env # Load environment variables (including RDS and AWS S3 creds) from this file
+    restart: unless-stopped # Automatically restart the container if it stops unexpectedly
+
+  # Nginx reverse proxy service
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "80:80"   # Nginx will only listen on HTTP port 80 locally
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+
+# No named volumes needed for database/static/media files for this S3/RDS setup.

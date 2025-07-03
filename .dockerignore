@@ -1,0 +1,13 @@
+# .dockerignore in SC---API/
+.git
+.gitignore
+.env
+venv/
+__pycache__/
+*.pyc
+*.log
+*.sqlite3
+rundb.sh
+runserver.sh
+.pytest_cache/
+.vscode/

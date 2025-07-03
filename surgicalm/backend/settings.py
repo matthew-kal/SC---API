@@ -29,8 +29,6 @@ INSTALLED_APPS = [
     'axes'
 ]
 
-CRON_CLASSES = []
-
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -65,7 +63,7 @@ MIDDLEWARE = [
     'axes.middleware.AxesMiddleware'
 ]
 
-ROOT_URLCONF = 'backend.urls'
+ROOT_URLCONF = 'surgicalm.backend.urls'
 
 TEMPLATES = [
     {
@@ -83,7 +81,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'backend.wsgi.application'
+WSGI_APPLICATION = 'surgicalm.backend.wsgi.application'
 
 DATABASES = {
     'default': {
