@@ -1,0 +1,13 @@
+# docker-compose.prod.yml
+
+services:
+  web:
+
+  nginx:
+    ports:
+      - "80:80" 
+      - "443:443" 
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt/live/api.surgicalm.com:/etc/letsencrypt/live/api.surgicalm.com:ro
+      - /etc/letsencrypt/archive/api.surgicalm.com:/etc/letsencrypt/archive/api.surgicalm.com:ro

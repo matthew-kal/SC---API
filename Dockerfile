@@ -2,15 +2,11 @@
 
 FROM python:3.11-slim-buster 
 
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE = 1
+ENV PYTHONUNBUFFERED = 1
 
 WORKDIR /app
 
-# Install system-level dependencies required for building Python packages like mysqlclient
-# 'build-essential' provides compilers (gcc, make)
-# 'pkg-config' is a helper tool for finding libraries
-# 'libmysqlclient-dev' provides the development headers for the MySQL client library
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
