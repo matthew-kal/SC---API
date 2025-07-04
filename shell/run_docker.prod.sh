@@ -18,7 +18,7 @@ fi
 echo ""
 echo "--- Building Docker images for production (Verbose Output) ---"
 # Correct syntax: --verbose comes after docker-compose, before -f flags and subcommand
-docker-compose --verbose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml build
+docker compose --verbose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml build
 
 if [ $? -ne 0 ]; then
   echo "Error: Docker image build failed for production. Check the verbose output above. Exiting."
@@ -28,36 +28,16 @@ fi
 echo ""
 echo "--- Starting production services (Web and Nginx containers) ---"
 # Correct syntax: --verbose after docker-compose, -f flags, then up -d
-docker-compose --verbose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml up -d
+docker compose --verbose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml up -d
 
 if [ $? -ne 0 ]; then
   echo "Error: Failed to start production services. Check the verbose output above. Exiting."
   exit 1
 fi
 
-echo ""
-echo "--- Running database migrations for production ---"
-# Run migrations as a one-off command in the web service
-# Ensure your RDS Security Group allows access from this EC2 instance!
-# Adding --verbose for migration output
-docker-compose --verbose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml run --rm web python surgicalm/manage.py migrate --noinput
+# REMOVED: Running database migrations section
 
-if [ $? -ne 0 ]; then
-  echo "Error: Database migrations failed. Check the verbose output above. Exiting."
-  exit 1
-fi
-
-echo ""
-echo "--- Collecting static files for production (uploads to S3) ---"
-# Collect static files as a one-off command
-# Ensure your EC2 IAM Role/credentials have S3 write permissions!
-# Adding --verbose for collectstatic output
-docker-compose --verbose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml run --rm web python surgicalm/manage.py collectstatic --noinput
-
-if [ $? -ne 0 ]; then
-  echo "Error: Static file collection failed. Check the verbose output above. Exiting."
-  exit 1
-fi
+# REMOVED: Collecting static files section
 
 echo ""
 echo "--- Production services are now running! ---"
@@ -66,7 +46,7 @@ echo "This will show live activity inside your running containers."
 echo "Press Ctrl+C to stop streaming logs and return to the script's end."
 echo ""
 # Correct syntax: --verbose after docker-compose, -f flags, then logs -f
-docker-compose --verbose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml logs -f
+docker compose --verbose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml logs -f
 
 echo ""
 echo "--- Script finished. To stop services: docker-compose -f docker-compose.yml -f docker-builds/docker-compose.prod.yaml down ---"
