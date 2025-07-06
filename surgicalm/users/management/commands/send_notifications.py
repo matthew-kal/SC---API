@@ -1,7 +1,7 @@
 import requests
 from itertools import islice
 from django.core.management.base import BaseCommand
-from users.models import PushNotificationToken
+from surgicalm.users.models import PushNotificationToken
 
 EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send'
 

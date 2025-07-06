@@ -22,7 +22,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
-    'surgicalm.users',
+    'surgicalm.users.apps.UsersConfig',
     'django_rest_passwordreset',
     'django_crontab',
     "widget_tweaks", 
