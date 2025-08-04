@@ -26,7 +26,8 @@ INSTALLED_APPS = [
     'django_rest_passwordreset',
     'django_crontab',
     "widget_tweaks", 
-    'axes'
+    'axes',
+    'django_celery_results',
 ]
 
 REST_FRAMEWORK = {
@@ -162,3 +163,12 @@ DEFAULT_FROM_EMAIL =  config('DEFAULT_FROM_EMAIL')
 # SECURE_HSTS_SECONDS = 31536000  
 # SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 # SECURE_HSTS_PRELOAD = True
+
+# Celery Configuration
+CELERY_BROKER_URL = 'redis://redis:6379/0'
+CELERY_RESULT_BACKEND = 'django-db' 
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+CELERY_TASK_TRACK_STARTED = True

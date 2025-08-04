@@ -32,8 +32,8 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
         password = attrs.get('password')
         password2 = attrs.get('password2')
 
-        # Validate email
-        if CustomUser.objects.filter(email=email).exists():
+        # Validate email (case-insensitive)
+        if CustomUser.objects.filter(email__iexact=email).exists():
             raise serializers.ValidationError({"email": "An account with this email already exists."})
 
         # Validate username
@@ -43,7 +43,8 @@ class PatientRegistrationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"username": "Username cannot exceed 30 characters."})
         if not username.isalnum():
             raise serializers.ValidationError({"username": "Username must contain only letters and numbers."})
-        if CustomUser.objects.filter(username=username).exists():
+        # Case-insensitive username check
+        if CustomUser.objects.filter(username__iexact=username).exists():
             raise serializers.ValidationError({"username": "This username is already taken. Please choose a different one."})
 
         # Validate password

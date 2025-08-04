@@ -9,9 +9,17 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env
+    depends_on:
+      - redis
 
   nginx: 
     image: nginx:stable-alpine
     depends_on:
       - web 
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
     restart: unless-stopped

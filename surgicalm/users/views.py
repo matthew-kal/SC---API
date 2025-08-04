@@ -33,6 +33,7 @@ from django_ratelimit.core import is_ratelimited
 from surgicalm.users.models import *  
 from surgicalm.users.auth import *
 from surgicalm.users.serializers import *
+from .services import refresh_user_data
 
 # Logger
 logger = logging.getLogger(__name__)
@@ -350,16 +351,6 @@ def modules_list(request, category, subcategory):
 @permission_classes([IsAuthenticated])
 def dashboard(request):
     user = request.user
-    today_date = timezone.now().date()
-
-    
-    user_refresh = UserVideoRefresh.objects.filter(patient=user).first()
-    
-    
-    if not user_refresh or user_refresh.last_refreshed.date() != today_date:
-        print("Running Helper")
-        refresh_user_data(request)
-
    
     general_videos = []
     tasks = []
@@ -426,59 +417,7 @@ def dashboard(request):
         'weekData': week_data or [],
     }, status=200)
 
-def refresh_user_data(request):
-    """Helper function to refresh user data."""
-
-    user = request.user
-    hospital = user.hospital
-    
-    # Step 1: Delete Existing Entries
-    AssignedModules.objects.filter(patient=user).delete()
-    AssignedTask.objects.filter(patient=user).delete()
-    AssignedQuote.objects.filter(patient=user).delete()
-
-    # Step 2: Retrieve Selected Categories and Subcategories
-    categories = DailyModuleCategories.objects.filter(hospital=hospital).values('category', 'subcategory')
-
-    # Step 3: Assign New Videos
-    for category_entry in categories:
-        category = category_entry['category']
-        subcategory = category_entry['subcategory']
-        print("Daily Modules Running")
-        videos = ModulesList.objects.filter(
-            category_id=category, 
-            subcategory_id=subcategory, 
-            hospital=hospital).order_by('?')
-        if videos.exists():
-            random_video = videos.first()
-            # Ensure uniqueness
-            if not AssignedModules.objects.filter(patient=user, video=random_video).exists():
-                AssignedModules.objects.create(patient=user, video=random_video, isCompleted=False)
-                print("Daily Modules Added")
-
-    # Step 4: Assign New Tasks
-    tasks = TaskList.objects.filter(hospital=hospital)  
-    for task in tasks:
-        # Ensure uniqueness
-        if not AssignedTask.objects.filter(patient=user, task=task).exists():
-            AssignedTask.objects.create(patient=user, task=task, isCompleted=False)  
-            print("Daily Task Added")
-
-    # Step 5: Assign New Quote
-    random_quote = Quotes.objects.order_by('?').first()
-    if random_quote:
-        # Ensure uniqueness
-        if not AssignedQuote.objects.filter(patient=user, quote=random_quote).exists():
-            AssignedQuote.objects.create(patient=user, quote=random_quote)
-            print("Daily Quote Added")
-
-    # Step 6: Update Refresh Date
-    user_refresh = UserVideoRefresh.objects.filter(patient=user).first()
-    if user_refresh:
-        user_refresh.last_refreshed = timezone.now().date()
-        user_refresh.save()
-    else:
-        UserVideoRefresh.objects.create(patient=user, last_refreshed=timezone.now().date())  
+  
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

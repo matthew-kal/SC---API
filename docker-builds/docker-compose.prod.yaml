@@ -3,6 +3,21 @@
 services:
   web:
 
+  celery-worker:
+    build: .
+    command: >
+      sh -c "
+        export PYTHONPATH=/app &&
+        export DJANGO_SETTINGS_MODULE=backend.settings &&
+        cd surgicalm &&
+        celery -A surgicalm.celeryapp worker --loglevel=info --concurrency=2
+      "
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - db
+
   nginx:
     ports:
       - "80:80" 
