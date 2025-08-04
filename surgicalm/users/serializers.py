@@ -1,7 +1,7 @@
 # serializers.py
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from surgicalm.users.models import CustomUser, PartnerHospitals
+from surgicalm.users.models import CustomUser, PartnerHospitals, AssignedModules, AssignedTask, AssignedQuote, ModuleCategories, ModuleSubcategories, TaskList
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -119,3 +119,44 @@ class NurseRegistrationSerializer(serializers.ModelSerializer):
 class PatientLoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField()
+
+class ModuleCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleCategories
+        fields = ['id', 'category', 'icon']
+
+class ModuleSubcategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModuleSubcategories
+        fields = ['id', 'subcategory']
+
+class AssignedTaskSerializer(serializers.ModelSerializer):
+    # Using 'source' to access related TaskList model's fields
+    name = serializers.CharField(source='task.taskName')
+    description = serializers.CharField(source='task.taskDesc')
+    icon = serializers.CharField(source='task.icon')
+
+    class Meta:
+        model = AssignedTask
+        fields = ['id', 'name', 'description', 'isCompleted', 'icon']
+
+class AssignedModuleSerializer(serializers.ModelSerializer):
+    # Using 'source' to access nested related model's fields
+    url = serializers.URLField(source='video.url')
+    title = serializers.CharField(source='video.title')
+    description = serializers.CharField(source='video.description')
+    icon = serializers.CharField(source='video.category.icon')
+    media_type = serializers.CharField(source='video.media_type')
+
+    class Meta:
+        model = AssignedModules
+        fields = ['id', 'url', 'title', 'description', 'isCompleted', 'icon', 'media_type']
+
+class AssignedQuoteSerializer(serializers.ModelSerializer):
+    # Renaming 'quote.Quote' for a cleaner API response key
+    quote_text = serializers.CharField(source='quote.Quote')
+
+    class Meta:
+        model = AssignedQuote
+        # Exposing the original model id and the renamed quote_text field
+        fields = ['id', 'quote_text']

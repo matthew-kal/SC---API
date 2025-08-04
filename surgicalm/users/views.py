@@ -33,7 +33,7 @@ from django_ratelimit.core import is_ratelimited
 from surgicalm.users.models import *  
 from surgicalm.users.auth import *
 from surgicalm.users.serializers import *
-from .services import refresh_user_data
+from .services import refresh_user_data, calculate_weekly_watched_data
 
 # Logger
 logger = logging.getLogger(__name__)
@@ -232,24 +232,43 @@ class CustomPasswordResetDoneView(PasswordResetDoneView):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def search_patients(request):
-    search_query = request.GET.get('query', '')
-    search_by = request.GET.get('searchBy', 'username')
+    search_query = request.GET.get('query', '').strip()
+    # Default to 'text' search if searchBy is not provided
+    search_by = request.GET.get('searchBy', 'text') 
     hospital = request.user.hospital
 
-    queryset = CustomUser.objects.filter(user_type='patient')
+    if not search_query:
+        return Response([], status=status.HTTP_200_OK)
+
+    # Base queryset for patients in the nurse's hospital
+    base_queryset = CustomUser.objects.filter(user_type='patient', hospital=hospital)
+
+    patients = CustomUser.objects.none() # Start with an empty queryset
 
     if search_by == 'id':
         try:
-            patients = queryset.filter(id=search_query, hospital=hospital)
-        except CustomUser.DoesNotExist:
-            return Response({"error": "Patient not found"}, status=status.HTTP_200_OK)
-    elif search_by == 'email':
-        patients = queryset.filter(email__icontains=search_query, hospital=hospital)
-    else:  
-        patients = queryset.filter(username__icontains=search_query, hospital=hospital)
-        
+            # Perform a direct, fast lookup by primary key (ID)
+            patient_id = int(search_query)
+            patients = base_queryset.filter(id=patient_id)
+        except (ValueError, TypeError):
+            # If the query is not a valid integer, return an error
+            return Response({"error": "Invalid ID format."}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        # Default to FULLTEXT search for 'text', 'username', 'email', etc.
+        # We add a '+' to each word to make it a boolean search for all terms.
+        terms = [f'+{term}' for term in search_query.split()]
+        if terms:
+            terms[-1] += '*'  # Add the wildcard to the last term
+        boolean_search_query = ' '.join(terms)
+
+        patients = base_queryset.extra(
+            where=["MATCH(username, email) AGAINST(%s IN BOOLEAN MODE)"],
+            params=[boolean_search_query]
+        )
+
     if not patients.exists():
-        return Response({"error": "No patients found"}, status=status.HTTP_200_OK)
+        # Return an empty list with a 200 OK status for "no results found"
+        return Response([], status=status.HTTP_200_OK)
 
     serializer = UserSerializer(patients, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
@@ -259,31 +278,15 @@ def search_patients(request):
 @permission_classes([IsAuthenticated])
 def patient_graph(request, id):
     try:
-        today = timezone.now().date()
-        start_of_week = today - timezone.timedelta(days=today.weekday())  # Monday
-
-        watched_entries = WatchedData.objects.filter(user_id=id, date__gte=start_of_week)
-        counts_by_day = watched_entries.annotate(day=TruncDate('date')).values('day').annotate(count=Count('id'))
-
-        day_map = {i: day for i, day in enumerate(['mon', 'tues', 'wed', 'thur', 'fri', 'sat', 'sun'])}
-        week_data = {day: 0 for day in day_map.values()}
-
-        for entry in counts_by_day:
-            weekday = entry['day'].weekday() 
-            day_label = day_map.get(weekday)
-            if day_label:
-                week_data[day_label] = entry['count']
-
-        week_data['week'] = sum(week_data.values())
-        week_data['all_time'] = WatchedData.objects.filter(user_id=id).count()
-
+        # Ensure the requesting nurse can only see patients in their own hospital
+        patient = CustomUser.objects.get(id=id, hospital=request.user.hospital)
+        week_data = calculate_weekly_watched_data(patient)
         return Response({'weekData': week_data}, status=status.HTTP_200_OK)
-
-    except ObjectDoesNotExist:
-        return Response({'error': 'No data found for the specified patient.'}, status=status.HTTP_404_NOT_FOUND)
-
+    except CustomUser.DoesNotExist:
+        return Response({'error': 'Patient not found for this hospital.'}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        return Response({'error': f'An unexpected error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.error(f"Error generating patient graph for user {id}: {e}")
+        return Response({'error': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     
 
@@ -293,12 +296,13 @@ def patient_graph(request, id):
 @permission_classes([IsAuthenticated])
 def category_list(request):
     """Returns all categories, their IDs, and icons for the requester's hospital."""
-    
     user_hospital = request.user.hospital
     if user_hospital is None:
         return Response({"error": "User is not associated with any hospital."}, status=status.HTTP_400_BAD_REQUEST)
-    categories = ModuleCategories.objects.filter(hospital=user_hospital).values("id", "category", "icon")
-    return Response({"categories": list(categories)}, status=status.HTTP_200_OK)
+    
+    categories = ModuleCategories.objects.filter(hospital=user_hospital)
+    serializer = ModuleCategorySerializer(categories, many=True)
+    return Response({"categories": serializer.data}, status=status.HTTP_200_OK)
 
     
 @api_view(['GET'])
@@ -311,18 +315,17 @@ def subcategory_list(request, category_id):
         if not ModuleCategories.objects.filter(id=category_id, hospital_id=hospital).exists():
             return Response({'error': 'Category not found for this hospital.'}, status=status.HTTP_404_NOT_FOUND)
 
-        subcategories = list(ModuleSubcategories.objects.filter(category_id=category_id, hospital_id=hospital).values("id", "subcategory"))
+        subcategories = ModuleSubcategories.objects.filter(category_id=category_id, hospital_id=hospital)
+        
+        if not subcategories.exists():
+            return Response({"subcategories": []}, status=status.HTTP_200_OK)
 
-        if not subcategories:
-            return Response(status=status.HTTP_204_NO_CONTENT)
-
-        return Response({"subcategories": subcategories}, status=status.HTTP_200_OK)
-
-    except ObjectDoesNotExist:
-        return Response({'error': 'Database error: Unable to retrieve category data.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        serializer = ModuleSubcategorySerializer(subcategories, many=True)
+        return Response({"subcategories": serializer.data}, status=status.HTTP_200_OK)
 
     except Exception as e:
-        return Response({'error': f'An unexpected error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.error(f"An unexpected error occurred in subcategory_list: {str(e)}")
+        return Response({'error': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -351,71 +354,26 @@ def modules_list(request, category, subcategory):
 @permission_classes([IsAuthenticated])
 def dashboard(request):
     user = request.user
-   
-    general_videos = []
-    tasks = []
-    quote = {}
 
-    assigned_videos = AssignedModules.objects.filter(patient=user).select_related("video")
-    general_videos = [
-        {
-            "id": assigned_video.video.id,  
-            "url": assigned_video.video.url, 
-            "title": assigned_video.video.title,  
-            "description": assigned_video.video.description,  
-            "isCompleted": assigned_video.isCompleted,
-            "icon": assigned_video.video.category.icon,
-            "media_type": assigned_video.video.media_type,  
-        }
-        for assigned_video in assigned_videos
-    ]
+    # Efficiently fetch assigned items and their related objects in fewer queries
+    assigned_videos = AssignedModules.objects.filter(patient=user).select_related('video__category')
+    assigned_tasks = AssignedTask.objects.filter(patient=user).select_related('task')
+    assigned_quote = AssignedQuote.objects.filter(patient=user).select_related('quote').first()
 
-    # Step 4: Retrieve Assigned Tasks
-    assigned_tasks = AssignedTask.objects.filter(patient=user).select_related("task")
-    tasks = [
-        {
-            "id": assigned_task.task.id,  
-            "name": assigned_task.task.taskName,  
-            "description": assigned_task.task.taskDesc,  
-            "isCompleted": assigned_task.isCompleted, 
-            "icon": assigned_task.task.icon,
-        }
-        for assigned_task in assigned_tasks
-    ]
+    # Use the serializers created in the previous task
+    video_serializer = AssignedModuleSerializer(assigned_videos, many=True)
+    task_serializer = AssignedTaskSerializer(assigned_tasks, many=True)
+    quote_serializer = AssignedQuoteSerializer(assigned_quote)
 
-    assigned_quote = AssignedQuote.objects.filter(patient=user).select_related("quote").first()
-
-    quote = None
-    if assigned_quote and assigned_quote.quote:
-        quote = {
-            "id": assigned_quote.quote.id, 
-            "quote": assigned_quote.quote.Quote  
-        }
-    
-    today = timezone.now().date()
-    start_of_week = today - timezone.timedelta(days=today.weekday())
-
-    watched_entries = WatchedData.objects.filter(user=user, date__gte=start_of_week)
-    counts_by_day = watched_entries.annotate(day=TruncDate('date')).values('day').annotate(count=Count('id'))
-
-    day_map = {i: day for i, day in enumerate(['mon', 'tues', 'wed', 'thur', 'fri', 'sat', 'sun'])}
-    week_data = {day: 0 for day in day_map.values()}
-
-    for entry in counts_by_day:
-        weekday = entry['day'].weekday()
-        day_label = day_map.get(weekday)
-        if day_label:
-            week_data[day_label] = entry['count']
-
-    week_data['week'] = sum(week_data.values())
-    week_data['all_time'] = WatchedData.objects.filter(user=user).count()
+    # Call the reusable helper for graph data
+    week_data = calculate_weekly_watched_data(user)
 
     return Response({
-        'generalVideos': general_videos or [], 
-        'tasks': tasks or [], 
-        'quote': quote or None, 
-        'weekData': week_data or [],
-    }, status=200)
+        'generalVideos': video_serializer.data,
+        'tasks': task_serializer.data,
+        'quote': quote_serializer.data if assigned_quote else None,
+        'weekData': week_data,
+    }, status=status.HTTP_200_OK)
 
   
 
@@ -477,21 +435,12 @@ def update_video_completion(request, videoId):
 @permission_classes([IsAuthenticated])
 def user_settings(request):
     try:
-        user = request.user
-
-        if not user or not user.is_authenticated:
-            return Response({'error': 'User not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        user_data = {
-            "username": user.username,
-            "id": user.id,
-            "email": user.email,
-        }
-
-        return Response(user_data, status=status.HTTP_200_OK)
-
+        # Use the existing UserSerializer for a consistent data structure
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response({'error': f'An unexpected error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.error(f"An unexpected error occurred in user_settings: {str(e)}")
+        return Response({'error': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

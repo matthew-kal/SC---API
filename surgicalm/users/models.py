@@ -17,7 +17,12 @@ class CustomUser(AbstractUser):
     )
     
     user_type = models.CharField(max_length = 10, choices = USER_TYPE_CHOICES, null=False, blank=False)
-    hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)    
+    hospital = models.ForeignKey(PartnerHospitals, on_delete=models.CASCADE, null=False, blank=False)
+    
+    class Meta(AbstractUser.Meta):
+        indexes = [
+            models.Index(fields=['hospital', 'user_type']),
+        ]    
 
 class Quotes(models.Model):
     Quote = models.CharField(max_length=255, null=False, blank=False, unique=True) 
@@ -76,6 +81,11 @@ class AssignedModules(models.Model):
     patient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=False, blank=False)
     video = models.ForeignKey(ModulesList, on_delete=models.CASCADE)
     isCompleted = models.BooleanField(default=False)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['patient', 'isCompleted']),
+        ]
 
 class AssignedQuote(models.Model):
     patient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=False, blank=False)
@@ -85,11 +95,21 @@ class AssignedTask(models.Model):
     patient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=False, blank=False)
     task = models.ForeignKey(TaskList, on_delete=models.CASCADE)
     isCompleted = models.BooleanField(default=False)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['patient', 'isCompleted']),
+        ]
 
 class WatchedData(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, null=False, blank=False)
     video = models.ForeignKey(ModulesList, on_delete=models.CASCADE, null=False, blank=False)
     date = models.DateField(default=now, null=False, blank=False)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'date']),
+        ]
 
 class PushNotificationToken(models.Model):
     token = models.CharField(max_length=255, unique=True)
