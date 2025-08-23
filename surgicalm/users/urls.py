@@ -74,4 +74,7 @@ urlpatterns = [
     # Notifications
     path('api/save-token/', save_push_token, name='save_push_token'),
 
+    # Task Refresh
+    path('tasks/refresh-all-user-data/', trigger_daily_user_refresh, name='trigger_daily_refresh'),
+
 ]

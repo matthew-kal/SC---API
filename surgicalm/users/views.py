@@ -16,8 +16,6 @@ from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.views import PasswordResetCompleteView, PasswordResetDoneView
 from django.conf import settings
 from django.db import transaction
-from django.db.models.functions import TruncDate
-from django.db.models import Count
 
 # Third-party imports
 from rest_framework import status
@@ -33,15 +31,13 @@ from django_ratelimit.core import is_ratelimited
 from surgicalm.users.models import *  
 from surgicalm.users.auth import *
 from surgicalm.users.serializers import *
-from .services import refresh_user_data, calculate_weekly_watched_data
+from .services import calculate_weekly_watched_data, refresh_user_data
 
 # Logger
 logger = logging.getLogger(__name__)
 
 # User Model 
 User = get_user_model()
-
-
 
 # ADMIN FUNCTIONS
 
@@ -504,4 +500,38 @@ def save_push_token(request):
         return Response({'error': 'Missing pushToken'}, status=status.HTTP_400_BAD_REQUEST)
     PushNotificationToken.objects.update_or_create(token=token, defaults={'patient': request.user})
     return Response({'status': 'Token saved'}, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+@permission_classes([AllowAny]) # We use a secret key for auth, not user login
+def trigger_daily_user_refresh(request):
+    """
+    A secure endpoint for Cloud Scheduler to trigger the daily data refresh for all patients.
+    """
+    # 1. AUTHORIZATION: Check for the secret header from Cloud Scheduler
+    auth_header = request.headers.get('X-Cron-Authorization')
+    expected_secret = getattr(settings, 'CRON_SECRET_KEY', None)
+
+    if not expected_secret or auth_header != f"Bearer {expected_secret}":
+        logger.warning("Unauthorized attempt to access daily refresh endpoint.")
+        return Response({"error": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # 2. EXECUTION: Loop through all patients and run the refresh logic
+    try:
+        patients = User.objects.filter(user_type='patient')
+        processed_count = 0
+        for patient in patients:
+            try:
+                with transaction.atomic():
+                    refresh_user_data(patient)
+                processed_count += 1
+            except Exception as e:
+                logger.error(f"Failed to refresh data for user {patient.id}: {e}")
+        
+        message = f"Successfully refreshed data for {processed_count} users."
+        logger.info(message)
+        return Response({"message": message}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"A critical error occurred during the daily refresh task: {e}")
+        return Response({"error": "An internal error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

@@ -1,9 +1,11 @@
 # Dockerfile
 
-FROM python:3.11-slim-bullseye 
+# --- Build Stage ---
+# This stage just gets our OS dependencies and Python packages ready
+FROM python:3.11-slim-bullseye as builder
 
-ENV PYTHONDONTWRITEBYTECODE = 1
-ENV PYTHONUNBUFFERED = 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
@@ -11,27 +13,50 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
-        libmariadb-dev-compat \ 
+        libmariadb-dev-compat \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements.txt and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
 
-# Copy the rest of your application code
-COPY . .
 
-# Set the working directory for Django commands to where 'manage.py' is.
-# This simplifies running Django management commands.
-WORKDIR /app/surgicalm
+# --- Final Stage ---
+# This is the final, lean image we will actually use
+FROM python:3.11-slim-bullseye as final
 
-# Reset the working directory to /app for consistent Gunicorn execution.
 WORKDIR /app
 
-# Expose the port Gunicorn will listen on inside the container.
+# Install only the OS packages needed to RUN the app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libmariadb-dev-compat \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create the non-root user
+RUN addgroup --system app && adduser --system --group app
+
+# Copy the pre-compiled Python packages from the builder stage,
+# and give ownership to the 'app' user.
+COPY --from=builder --chown=app:app /app/wheels /wheels
+
+# Copy the application code and give ownership to the 'app' user
+COPY --chown=app:app . .
+
+# Switch to the non-root user
+USER app
+
+# Set the PATH to include the user's local bin directory
+ENV PATH="/home/app/.local/bin:${PATH}"
+
+# Now, as the 'app' user, install the packages to the local bin directory
+RUN pip install --no-cache-dir --user /wheels/*
+
+# Set the final working directory
+WORKDIR /app/surgicalm
+
+ENV PYTHONPATH /app
+
+
 EXPOSE 8000
 
-# The command to run the Gunicorn server when the container starts.
-# 'gunicorn' runs directly because dependencies were installed globally in the container.
-# 'surgicalm.backend.wsgi:application' is the correct Python dotted path from /app.
 CMD ["gunicorn", "--workers", "2", "--bind", "0.0.0.0:8000", "surgicalm.backend.wsgi:application"]
