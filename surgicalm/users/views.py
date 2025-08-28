@@ -16,6 +16,10 @@ from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.views import PasswordResetCompleteView, PasswordResetDoneView
 from django.conf import settings
 from django.db import transaction
+from datetime import timedelta
+
+# Google Cloud Storage imports
+from google.cloud import storage
 
 # Third-party imports
 from rest_framework import status
@@ -43,7 +47,7 @@ User = get_user_model()
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-@ratelimit(key='none', rate='5/h', method='POST', block=True)
+@ratelimit(key='ip', rate='5/h', method='POST', block=True)
 def create_nurse(request):
     """Registers a nurse with an assigned hospital if a valid dev key is provided"""
 
@@ -62,7 +66,10 @@ def create_nurse(request):
 
     return Response(nurse_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
+@permission_classes([AllowAny])
+@api_view(['GET'])
+def health_check(request):
+    return Response({"status": "healthy"}, status=status.HTTP_200_OK)
 
 # AUTH (NURSE & PATIENT)
 
@@ -136,7 +143,7 @@ def patient_register(request):
     )
 
     if serializer.is_valid():
-        patient = serializer.save()                     # password validation happens in serializer
+        patient = serializer.save()                    
         logger.info("Nurse %s created patient %s", request.user.id, patient.id)
 
         # Build a Location header if you have a detail route; fallback to a sensible URL otherwise
@@ -328,8 +335,9 @@ def subcategory_list(request, category_id):
 def modules_list(request, category, subcategory):
 
     try:
+        # Ensure only modules from the user's hospital are accessible
         videos = ModulesList.objects.filter(
-            category_id=category, subcategory_id=subcategory, 
+            category_id=category, subcategory_id=subcategory, hospital=request.user.hospital
         ).values('id', 'title', 'url', 'category', 'subcategory', 'description', 'media_type')
         videos_list = list(videos)
         
@@ -348,10 +356,50 @@ def modules_list(request, category, subcategory):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def get_module_signed_url(request, module_id):
+    """
+    Generates a short-lived, secure signed URL for a given module.
+    Only accessible to users within the same hospital as the module.
+    """
+    try:
+        module = ModulesList.objects.get(id=module_id, hospital=request.user.hospital)
+        file_url = module.url
+        if file_url.startswith('gs://'):
+            file_path_in_bucket = file_url.split('/', 3)[-1] if '/' in file_url else file_url
+        elif 'storage.googleapis.com' in file_url or 'storage.cloud.google.com' in file_url:
+            url_parts = file_url.split('/')
+            if len(url_parts) > 4:
+                file_path_in_bucket = '/'.join(url_parts[4:])
+            else:
+                file_path_in_bucket = url_parts[-1]
+        else:
+            file_path_in_bucket = file_url.lstrip('/')
+
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(settings.STORAGE_BUCKET_NAME)
+        blob = bucket.blob(file_path_in_bucket)
+
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(minutes=15),
+            method="GET",
+        )
+
+        logger.info(f"Generated signed URL for module {module_id} for user {request.user.id}")
+        return Response({"signedUrl": signed_url}, status=status.HTTP_200_OK)
+
+    except ModulesList.DoesNotExist:
+        logger.warning(f"Module {module_id} not found for hospital {request.user.hospital} (user {request.user.id})")
+        return Response({"error": "Module not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error generating signed URL for module {module_id}: {e}")
+        return Response({"error": "Could not generate media URL."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def dashboard(request):
     user = request.user
 
-    # Efficiently fetch assigned items and their related objects in fewer queries
     assigned_videos = AssignedModules.objects.filter(patient=user).select_related('video__category')
     assigned_tasks = AssignedTask.objects.filter(patient=user).select_related('task')
     assigned_quote = AssignedQuote.objects.filter(patient=user).select_related('quote').first()

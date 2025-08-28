@@ -64,6 +64,8 @@ urlpatterns = [
     path('categories/', category_list, name='category_list'),
     path('<int:category_id>/subcategories/', subcategory_list, name="subcategory_list"),
     path('<int:category>/<int:subcategory>/modules-list/', modules_list, name='modules_list'),
+    # Secure Media Access
+    path('modules/<int:module_id>/signed-url/', get_module_signed_url, name='get_module_signed_url'),
     # Settings
     path('user-settings/', user_settings, name='user_settings'),
     path('change-password/', change_password, name='change_password'),
@@ -76,5 +78,7 @@ urlpatterns = [
 
     # Task Refresh
     path('tasks/refresh-all-user-data/', trigger_daily_user_refresh, name='trigger_daily_refresh'),
+
+    path('health-check/', health_check, name='health_check'),
 
 ]

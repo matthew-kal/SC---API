@@ -31,10 +31,11 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL')
 
 if ENVIRONMENT == 'production':
     DEBUG = False
-    ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')
+    ALLOWED_HOSTS = ['api.surgicalm.com', '.run.app']
     CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='').split(',')
     
     SESSION_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = True
     SECURE_HSTS_SECONDS = 31536000
@@ -45,12 +46,11 @@ if ENVIRONMENT == 'production':
     CORS_ALLOWED_ORIGINS = [] 
 
 
-else: # Local environment
+else: 
     DEBUG = True
-    ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
-    CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:8000', 'http://localhost:8000']
+    ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '0.0.0.0']
+    CSRF_TRUSTED_ORIGINS = ['127.0.0.1', 'localhost', "0.0.0.0"]
     
-    # Simple settings for local
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
     CORS_ALLOW_ALL_ORIGINS = True 

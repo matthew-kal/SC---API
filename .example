@@ -10,7 +10,7 @@ SECRET_KEY=
 DEV_KEY= 
 
 # Refresh Key 
-REFRESH_KEY=
+CRON_SECRET_KEY=
 
 # GCP Configuration
 STORAGE_BUCKET_NAME=
