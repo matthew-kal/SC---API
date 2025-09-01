@@ -8,6 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ENVIRONMENT = config('ENVIRONMENT', default='local')
 SECRET_KEY = config('SECRET_KEY')
 DEV_KEY = config('DEV_KEY')
+CRON_SECRET_KEY = config('CRON_SECRET_KEY')
 BASE_URL = config('BASE_URL')
 
 LANGUAGE_CODE = 'en-us'

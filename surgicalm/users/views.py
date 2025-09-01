@@ -557,9 +557,9 @@ def trigger_daily_user_refresh(request):
     """
     # 1. AUTHORIZATION: Check for the secret header from Cloud Scheduler
     auth_header = request.headers.get('X-Cron-Authorization')
-    expected_secret = getattr(settings, 'CRON_SECRET_KEY', None)
+    expected_secret = auth_cron(auth_header)
 
-    if not expected_secret or auth_header != f"Bearer {expected_secret}":
+    if not expected_secret:
         logger.warning("Unauthorized attempt to access daily refresh endpoint.")
         return Response({"error": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
 

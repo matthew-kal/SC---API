@@ -4,6 +4,9 @@ from django.contrib.auth import authenticate
 def auth_dev(key):
     return key == settings.DEV_KEY
 
+def auth_cron(key):
+    return key == settings.CRON_SECRET_KEY
+
 def auth_nurse(username, password, request=None):
     user = authenticate(request=request, username=username, password=password)
     if user and user.user_type == 'nurse':
