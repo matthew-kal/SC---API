@@ -50,7 +50,7 @@ if ENVIRONMENT == 'production':
 else: 
     DEBUG = True
     ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '0.0.0.0']
-    CSRF_TRUSTED_ORIGINS = ['127.0.0.1', 'localhost', "0.0.0.0"]
+    CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1', 'http://localhost', "http://0.0.0.0"]
     
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False

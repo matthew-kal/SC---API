@@ -2,6 +2,8 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils.timezone import now
 from django.conf import settings
+from django.core.validators import URLValidator
+
 
 class PartnerHospitals(models.Model):
     hospital_name = models.CharField(max_length=255, unique=True, null=False, blank=False)
@@ -65,7 +67,7 @@ class ModulesList(models.Model):
     subcategory = models.ForeignKey(ModuleSubcategories, on_delete=models.CASCADE, null=False, blank=False)
     title = models.CharField(max_length=255, null=False, blank=False)
     description = models.TextField(null=False, blank=False)
-    url = models.URLField(null=False, blank=False)
+    url = models.URLField(null=False, blank=False, validators=[URLValidator(schemes=['http', 'https', 'ftp', 'ftps', 'gs'])])
     media_type   = models.CharField(max_length=5, choices=MEDIA_CHOICES, default='video', null=False, blank=False)
 
 class DailyModuleCategories(models.Model):
