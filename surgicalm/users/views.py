@@ -2,7 +2,6 @@
 import logging
 import time 
 
-# Standard library imports
 from django.utils import timezone
 from django.urls import reverse
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -18,10 +17,11 @@ from django.conf import settings
 from django.db import transaction
 from datetime import timedelta
 
-# Google Cloud Storage imports
 from google.cloud import storage
+from google.auth import impersonated_credentials
+from google.auth import default
+            
 
-# Third-party imports
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -31,16 +31,13 @@ from axes.decorators import axes_dispatch
 from django_ratelimit.decorators import ratelimit
 from django_ratelimit.core import is_ratelimited
 
-# Local (project-specific) imports
 from surgicalm.users.models import *  
 from surgicalm.users.auth import *
 from surgicalm.users.serializers import *
 from .services import calculate_weekly_watched_data, refresh_user_data
 
-# Logger
 logger = logging.getLogger(__name__)
 
-# User Model 
 User = get_user_model()
 
 # ADMIN FUNCTIONS
@@ -145,6 +142,15 @@ def patient_register(request):
     if serializer.is_valid():
         patient = serializer.save()                    
         logger.info("Nurse %s created patient %s", request.user.id, patient.id)
+
+        # Assign initial modules, tasks, and quotes to the new patient
+        try:
+            refresh_user_data(patient)
+            logger.info("Successfully assigned initial content to patient %s", patient.id)
+        except Exception as e:
+            logger.error(f"Failed to assign initial content to patient {patient.id}: {e}")
+            # Don't fail the registration if content assignment fails
+            # The patient can still be created and content will be assigned during daily refresh
 
         # Build a Location header if you have a detail route; fallback to a sensible URL otherwise
         try:
@@ -361,38 +367,87 @@ def get_module_signed_url(request, module_id):
     Generates a short-lived, secure signed URL for a given module.
     Only accessible to users within the same hospital as the module.
     """
+    logger.info(f"[SIGNED_URL] Request received for module {module_id} by user {request.user.id} "
+                f"(hospital={getattr(request.user, 'hospital', None)})")
+
     try:
+        # STEP 1: Verify module belongs to the user’s hospital
+        logger.debug(f"[SIGNED_URL] Attempting to fetch module {module_id}...")
         module = ModulesList.objects.get(id=module_id, hospital=request.user.hospital)
+        logger.info(f"[SIGNED_URL] Found module {module_id} for hospital {request.user.hospital}")
+
         file_url = module.url
+        logger.debug(f"[SIGNED_URL] Raw file_url from DB: {file_url}")
+
+        # STEP 2: Derive the object path inside the bucket
         if file_url.startswith('gs://'):
             file_path_in_bucket = file_url.split('/', 3)[-1] if '/' in file_url else file_url
+            logger.debug(f"[SIGNED_URL] Derived path from gs://: {file_path_in_bucket}")
         elif 'storage.googleapis.com' in file_url or 'storage.cloud.google.com' in file_url:
             url_parts = file_url.split('/')
             if len(url_parts) > 4:
                 file_path_in_bucket = '/'.join(url_parts[4:])
             else:
                 file_path_in_bucket = url_parts[-1]
+            logger.debug(f"[SIGNED_URL] Derived path from https://storage.googleapis.com/: {file_path_in_bucket}")
         else:
             file_path_in_bucket = file_url.lstrip('/')
+            logger.debug(f"[SIGNED_URL] Derived path (fallback): {file_path_in_bucket}")
 
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(settings.STORAGE_BUCKET_NAME)
+        # STEP 3: Initialize storage client
+        try:
+            storage_client = storage.Client()
+            logger.info("[SIGNED_URL] Initialized Google Cloud Storage client.")
+        except Exception as client_err:
+            logger.error(f"[SIGNED_URL] Failed to init GCS client: {client_err}", exc_info=True)
+            return Response({"error": "Storage client initialization failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        bucket_name = settings.STORAGE_BUCKET_NAME
+        logger.info(f"[SIGNED_URL] Using bucket: {bucket_name}, path: {file_path_in_bucket}")
+
+        # STEP 4: Get blob reference
+        bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(file_path_in_bucket)
+        logger.debug(f"[SIGNED_URL] Blob object created for {file_path_in_bucket}")
 
-        signed_url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(minutes=15),
-            method="GET",
-        )
+        # STEP 5: Generate signed URL using service account impersonation
+        try:
+            
+            # Get default credentials (will be the Cloud Run service account)
+            source_credentials, project_id = default()
+            
+            # Create impersonated credentials for signing
+            # Note: We're impersonating the same service account to get signing capabilities
+            target_credentials = impersonated_credentials.Credentials(
+                source_credentials=source_credentials,
+                target_principal=settings.SERVICE_ACCOUNT_EMAIL,
+                target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            
+            # Create a new storage client with the impersonated credentials
+            signing_client = storage.Client(credentials=target_credentials)
+            signing_bucket = signing_client.bucket(bucket_name)
+            signing_blob = signing_bucket.blob(file_path_in_bucket)
+            
+            # Generate the signed URL
+            signed_url = signing_blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(minutes=90),
+                method="GET",
+            )
+            
+            logger.info(f"[SIGNED_URL] Successfully generated signed URL for module {module_id}")
+            return Response({"signedUrl": signed_url}, status=status.HTTP_200_OK)
 
-        logger.info(f"Generated signed URL for module {module_id} for user {request.user.id}")
-        return Response({"signedUrl": signed_url}, status=status.HTTP_200_OK)
+        except Exception as gen_err:
+            logger.error(f"[SIGNED_URL] Failed to generate signed URL for module {module_id}: {gen_err}", exc_info=True)
+            return Response({"error": "Signed URL generation failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     except ModulesList.DoesNotExist:
-        logger.warning(f"Module {module_id} not found for hospital {request.user.hospital} (user {request.user.id})")
+        logger.warning(f"[SIGNED_URL] Module {module_id} not found or not in hospital {request.user.hospital}")
         return Response({"error": "Module not found"}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        logger.error(f"Error generating signed URL for module {module_id}: {e}")
+        logger.error(f"[SIGNED_URL] Unexpected error for module {module_id}: {e}", exc_info=True)
         return Response({"error": "Could not generate media URL."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
@@ -551,6 +606,7 @@ def save_push_token(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny]) # We use a secret key for auth, not user login
+@axes_dispatch
 def trigger_daily_user_refresh(request):
     """
     A secure endpoint for Cloud Scheduler to trigger the daily data refresh for all patients.
@@ -560,10 +616,9 @@ def trigger_daily_user_refresh(request):
     expected_secret = auth_cron(auth_header)
 
     if not expected_secret:
-        logger.warning("Unauthorized attempt to access daily refresh endpoint.")
+        logger.warning(f"Unauthorized attempt to access daily refresh endpoint.")
         return Response({"error": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
 
-    # 2. EXECUTION: Loop through all patients and run the refresh logic
     try:
         patients = User.objects.filter(user_type='patient')
         processed_count = 0

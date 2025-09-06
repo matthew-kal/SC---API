@@ -11,3 +11,7 @@ rundb.sh
 runserver.sh
 .pytest_cache/
 .vscode/
+shell/ 
+commands.md
+README.md
+.vscode/
