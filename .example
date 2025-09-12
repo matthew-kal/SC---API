@@ -9,9 +9,6 @@ SECRET_KEY=
 # Nurse Account Creation
 DEV_KEY= 
 
-# Refresh Key 
-CRON_SECRET_KEY=
-
 # GCP Configuration
 STORAGE_BUCKET_NAME=
 DATABASE_NAME=

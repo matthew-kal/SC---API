@@ -135,22 +135,23 @@ class AssignedTaskSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source='task.taskName')
     description = serializers.CharField(source='task.taskDesc')
     icon = serializers.CharField(source='task.icon')
+    id = serializers.IntegerField(source='task.id')
 
     class Meta:
         model = AssignedTask
         fields = ['id', 'name', 'description', 'isCompleted', 'icon']
 
 class AssignedModuleSerializer(serializers.ModelSerializer):
-    # Using 'source' to access nested related model's fields
-    url = serializers.URLField(source='video.url')
+    
     title = serializers.CharField(source='video.title')
     description = serializers.CharField(source='video.description')
     icon = serializers.CharField(source='video.category.icon')
     media_type = serializers.CharField(source='video.media_type')
+    id = serializers.IntegerField(source='video.id')
 
     class Meta:
         model = AssignedModules
-        fields = ['id', 'url', 'title', 'description', 'isCompleted', 'icon', 'media_type']
+        fields = ['id', 'title', 'description', 'isCompleted', 'icon', 'media_type']
 
 class AssignedQuoteSerializer(serializers.ModelSerializer):
     # Renaming 'quote.Quote' for a cleaner API response key

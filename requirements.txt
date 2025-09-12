@@ -27,3 +27,4 @@ sqlparse==0.5.3
 urllib3==2.3.0
 django-widget-tweaks==1.5.0
 whitenoise[brotli]==6.6.0
+google-auth==2.26.1

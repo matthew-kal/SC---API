@@ -16,6 +16,7 @@ from django.contrib.auth.views import PasswordResetCompleteView, PasswordResetDo
 from django.conf import settings
 from django.db import transaction
 from datetime import timedelta
+from django.core.mail import send_mail
 
 from google.cloud import storage
 from google.auth import impersonated_credentials
@@ -23,7 +24,7 @@ from google.auth import default
             
 
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -35,6 +36,7 @@ from surgicalm.users.models import *
 from surgicalm.users.auth import *
 from surgicalm.users.serializers import *
 from .services import calculate_weekly_watched_data, refresh_user_data
+from .auth_decorators import oidc_auth_required
 
 logger = logging.getLogger(__name__)
 
@@ -176,40 +178,28 @@ def patient_register(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-@ratelimit(key='ip', rate='5/h', method='POST', block=False)
+@ratelimit(key='ip', rate='100/h', block=True)
+@ratelimit(key='post:email', rate='100/h', block=True)
 def request_password_reset(request):
     """
-    Send a password‑reset email *if and only if* the user exists, but
-    take roughly the same amount of time whether or not the e‑mail is registered.
-    This prevents timing‑based account enumeration attacks.
+    Send a password-reset email *if and only if* the user exists, but
+    take roughly the same amount of time whether or not the e-mail is registered.
+    This prevents timing-based account enumeration attacks.
     """
-    start_time = time.monotonic()          # ── begin timer for constant‑time padding
 
-    # Ratelimit #1: IP-based
-    if getattr(request, 'limited', False):
-        return Response(
-            {'message': 'Too many requests from this IP. Try again later.'},
-            status=status.HTTP_429_TOO_MANY_REQUESTS,
-        )
+    start_time = time.monotonic()  
 
     email = request.data.get('email', '').lower().strip()
     if not email:
         return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Ratelimit #2: Per‑email (shared cache)
-    if is_ratelimited(request=request, key=lambda r: email, rate='2/h',
-                      method='POST', increment=True):
-        return Response(
-            {'message': 'Too many requests for this account. Try again later.'},
-            status=status.HTTP_429_TOO_MANY_REQUESTS,
-        )
 
     try:
         user = CustomUser.objects.filter(email__iexact=email).first()
         if user:
             token = default_token_generator.make_token(user)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
-            reset_link = f"{settings.BASE_URL}/password-reset-confirm/{uid}/{token}/"
+            reset_path = reverse('password_reset_confirm', kwargs={'uidb64': uid, 'token': token})
+            reset_link = f"{settings.BASE_URL}{reset_path}"
 
             send_mail(
                 subject="Password Reset",
@@ -221,7 +211,7 @@ def request_password_reset(request):
     except Exception as e:
         logger.error(f"Error in password-reset flow for {email}: {e}")
 
-    # Constant‑time padding ─ ensure every call lasts at least ~0.5 s
+    # Constant-time padding ─ ensure every call lasts at least ~0.5 s
     elapsed = time.monotonic() - start_time
     if elapsed < 0.5:
         time.sleep(0.5 - elapsed)
@@ -231,8 +221,11 @@ def request_password_reset(request):
         status=status.HTTP_200_OK,
     )
 
+
 class CustomPasswordResetCompleteView(PasswordResetCompleteView):
     template_name = 'templates/password_reset_complete.html'
+
+
 class CustomPasswordResetDoneView(PasswordResetDoneView):
     template_name = 'templates/password_reset_done.html'
 
@@ -242,7 +235,6 @@ class CustomPasswordResetDoneView(PasswordResetDoneView):
 @permission_classes([IsAuthenticated])
 def search_patients(request):
     search_query = request.GET.get('query', '').strip()
-    # Default to 'text' search if searchBy is not provided
     search_by = request.GET.get('searchBy', 'text') 
     hospital = request.user.hospital
 
@@ -459,12 +451,10 @@ def dashboard(request):
     assigned_tasks = AssignedTask.objects.filter(patient=user).select_related('task')
     assigned_quote = AssignedQuote.objects.filter(patient=user).select_related('quote').first()
 
-    # Use the serializers created in the previous task
     video_serializer = AssignedModuleSerializer(assigned_videos, many=True)
     task_serializer = AssignedTaskSerializer(assigned_tasks, many=True)
     quote_serializer = AssignedQuoteSerializer(assigned_quote)
 
-    # Call the reusable helper for graph data
     week_data = calculate_weekly_watched_data(user)
 
     return Response({
@@ -475,7 +465,6 @@ def dashboard(request):
     }, status=status.HTTP_200_OK)
 
   
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def update_task_completion(request, taskId):
@@ -529,12 +518,10 @@ def update_video_completion(request, videoId):
         return Response({'error': f'An unexpected error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 
-# Patient settings patient information
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_settings(request):
     try:
-        # Use the existing UserSerializer for a consistent data structure
         serializer = UserSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
     except Exception as e:
@@ -543,6 +530,7 @@ def user_settings(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@ratelimit(key='user', rate='2/h', method='POST', block=True)
 def change_password(request):
     old_password = request.data.get('old_password')
     new_password = request.data.get('new_password')
@@ -605,20 +593,11 @@ def save_push_token(request):
     return Response({'status': 'Token saved'}, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
-@permission_classes([AllowAny]) # We use a secret key for auth, not user login
+@permission_classes([AllowAny])
+@authentication_classes([])
 @axes_dispatch
+@oidc_auth_required
 def trigger_daily_user_refresh(request):
-    """
-    A secure endpoint for Cloud Scheduler to trigger the daily data refresh for all patients.
-    """
-    # 1. AUTHORIZATION: Check for the secret header from Cloud Scheduler
-    auth_header = request.headers.get('X-Cron-Authorization')
-    expected_secret = auth_cron(auth_header)
-
-    if not expected_secret:
-        logger.warning(f"Unauthorized attempt to access daily refresh endpoint.")
-        return Response({"error": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
-
     try:
         patients = User.objects.filter(user_type='patient')
         processed_count = 0
